@@ -1,0 +1,15 @@
+[package]
+name = "sway_raft"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = {version = "1.0.140"}
+rmp-serde = "1.3.0"
+csv = "1.3"
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
+clap = {version = "4.5.35", features = ["derive"]}
+byteorder = "1.5"
+anyhow = "1.0.98"
