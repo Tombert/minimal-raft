@@ -1,5 +1,5 @@
 [package]
-name = "sway_raft"
+name = "rust_raft"
 version = "0.1.0"
 edition = "2021"
 

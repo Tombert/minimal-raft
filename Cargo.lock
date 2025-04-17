@@ -1020,6 +1020,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust_raft"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "byteorder",
+ "clap",
+ "csv",
+ "futures",
+ "reqwest",
+ "rmp-serde",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1189,23 +1206,6 @@ name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
-
-[[package]]
-name = "sway_raft"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "byteorder",
- "clap",
- "csv",
- "futures",
- "reqwest",
- "rmp-serde",
- "serde",
- "serde_json",
- "tokio",
-]
 
 [[package]]
 name = "syn"
