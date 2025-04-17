@@ -13,3 +13,5 @@ reqwest = { version = "0.11", default-features = false, features = ["json", "rus
 clap = {version = "4.5.35", features = ["derive"]}
 byteorder = "1.5"
 anyhow = "1.0.98"
+axum = "0.8.3"
+futures = "0.3"
