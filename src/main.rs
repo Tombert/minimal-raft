@@ -110,11 +110,11 @@ async fn insert_into_temp_store(key: String, value: String) {
     temp_store.insert(key, value);
 }
 
-async fn get_from_stores(key: &String) -> Option<String> {
+async fn get_from_stores(key: &String) -> (bool, Option<String>) {
     let temp_store = TEMP_GLOBAL_STORE.get().expect("NOT INIT").lock().await;
 
     if let Some(val) = temp_store.get(key) {
-        return Some(val.to_string());
+        return (false, Some(val.to_string()));
     } 
 
     let store = GLOBAL_STORE
@@ -123,10 +123,10 @@ async fn get_from_stores(key: &String) -> Option<String> {
         .lock().await;
 
     if let Some(val) = store.get(key){
-        return Some(val.to_string());
+        return (true, Some(val.to_string()));
     }
 
-    None
+    (false, None)
 }
 
 
@@ -348,18 +348,20 @@ struct GetValueResponse {
     node_id : String,
     key : String, 
     value : Option<String>,
-    was_found: bool
+    was_found: bool,
+    is_persisted: bool
 }
 
-async fn handle_get_value(State(state) : State<Arc<Mutex<AppState>>> , Json(req) : Json<GetValueRequest>) -> impl IntoResponse {
+async fn handle_get_value(State(_state) : State<Arc<Mutex<AppState>>> , Json(req) : Json<GetValueRequest>) -> impl IntoResponse {
 
-  let value = get_from_stores(&req.key).await; 
+  let (is_persisted, value) = get_from_stores(&req.key).await; 
   let key = req.key.clone();
 
   let resp = GetValueResponse {
       was_found : value.clone().is_some(),
       value, 
       key, 
+      is_persisted,
       node_id : NODE_ID.to_string()
   };
 
