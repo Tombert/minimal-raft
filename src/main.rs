@@ -3,8 +3,6 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use axum::{
     response::IntoResponse, routing::{get, post}, Json, Router,  extract::State,
 };
-use futures::future::join_all;
-use reqwest::Client;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc::{Receiver, Sender}, Mutex, OnceCell};
@@ -81,9 +79,13 @@ struct VoteResponse {
 const NODE_ID : &str= "A";
 
 static GLOBAL_STORE: OnceCell<Mutex<HashMap<String, String>>> = OnceCell::const_new();
+static TEMP_GLOBAL_STORE: OnceCell<Mutex<HashMap<String, String>>> = OnceCell::const_new();
 
-async fn init_global_store() {
+async fn init_global_stores() {
     GLOBAL_STORE
+        .set(Mutex::new(HashMap::new()))
+        .expect("GLOBAL_STORE already initialized");
+    TEMP_GLOBAL_STORE
         .set(Mutex::new(HashMap::new()))
         .expect("GLOBAL_STORE already initialized");
 }
@@ -93,12 +95,38 @@ async fn insert_into_store(key: String, value: String) {
         .get()
         .expect("GLOBAL_STORE not initialized")
         .lock().await;
+    let mut temp_store = GLOBAL_STORE.get().expect("TEMP not inited").lock().await; 
+    temp_store.remove(&key);
     store.insert(key, value);
 }
 
 async fn apply_fn(key: String, value: String) {
     insert_into_store(key, value).await;
 
+}
+
+async fn insert_into_temp_store(key: String, value: String) {
+    let mut temp_store = TEMP_GLOBAL_STORE.get().expect("NOT INIT").lock().await;
+    temp_store.insert(key, value);
+}
+
+async fn get_from_stores(key: &String) -> Option<String> {
+    let temp_store = TEMP_GLOBAL_STORE.get().expect("NOT INIT").lock().await;
+
+    if let Some(val) = temp_store.get(key) {
+        return Some(val.to_string());
+    } 
+
+    let store = GLOBAL_STORE
+        .get()
+        .expect("GLOBAL_STORE not initialized")
+        .lock().await;
+
+    if let Some(val) = store.get(key){
+        return Some(val.to_string());
+    }
+
+    None
 }
 
 
@@ -210,7 +238,7 @@ async fn handle_append_entry(State(state) : State<Arc<Mutex<AppState>>> , Json(r
 fn send_append_logs(state: Arc<Mutex<AppState>>) {
     tokio::task::spawn(async move {
         loop {
-            let (term, entries, peers, role) = {
+            let (_term, _entries, peers, role) = {
                 let s = state.lock().await;
                 (
                     s.term,
@@ -297,6 +325,82 @@ fn send_append_logs(state: Arc<Mutex<AppState>>) {
     });
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct AddValueResponse {
+    node_id : String,
+    success : bool,
+    leader : Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AddValueRequest {
+    key: String, 
+    value: String
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct GetValueRequest {
+    key : String
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct GetValueResponse {
+    node_id : String,
+    key : String, 
+    value : Option<String>,
+    was_found: bool
+}
+
+async fn handle_get_value(State(state) : State<Arc<Mutex<AppState>>> , Json(req) : Json<GetValueRequest>) -> impl IntoResponse {
+
+  let value = get_from_stores(&req.key).await; 
+  let key = req.key.clone();
+
+  let resp = GetValueResponse {
+      was_found : value.clone().is_some(),
+      value, 
+      key, 
+      node_id : NODE_ID.to_string()
+  };
+
+  axum::Json(resp)
+
+}
+async fn handle_add_value(State(state) : State<Arc<Mutex<AppState>>> , Json(req) : Json<AddValueRequest>) -> impl IntoResponse {
+
+    let mut s = state.lock().await; 
+    let resp = if let Roles::Leader =  s.role {
+        let key = req.key; 
+        let value = req.value; 
+        let term = s.term; 
+        let temp_key = key.clone();
+        let temp_value = key.clone(); 
+        let in_obj = Entry {
+            key,
+            value,
+            term
+        };
+
+        s.entries.push(in_obj);
+        s.last_log_term = term; 
+        s.last_log_index = s.entries.len().saturating_sub(1);
+        insert_into_temp_store(temp_key, temp_value).await;
+        AddValueResponse {
+            node_id : NODE_ID.to_string(),
+            success : true,
+            leader : None
+
+        }
+    } else {
+        AddValueResponse {
+            node_id : NODE_ID.to_string(),
+            success : false,
+            leader : Some(s.current_leader.clone())
+        }
+    };
+
+    axum::Json(resp)
+}
 
 fn heartbeat_checker(state: Arc<Mutex<AppState>> , mut in_chan : Receiver<bool>) {
     let nodes : Vec<String> = Vec::new();
@@ -360,15 +464,11 @@ fn heartbeat_checker(state: Arc<Mutex<AppState>> , mut in_chan : Receiver<bool>)
                                 if votes >= (s.nodes.len() + 1) / 2 + 1 {
                                     s.role = Roles::Leader; 
                                 }
-
                             } 
-
-
                         }
                         _ => ()
 
                     }
-
                 }
             }
             // So we're not constantly spammng in the case it was successful. 
@@ -396,7 +496,7 @@ async fn main() {
                     current_leader: String::from(""), 
                     role: Roles::Follower}));
 
-    init_global_store().await;
+    init_global_stores().await;
     send_append_logs(state.clone());
     let ( heartbeat_sender, heartbeat_receiver) = tokio::sync::mpsc::channel::<bool>(5);
     heartbeat_checker(state.clone(), heartbeat_receiver ) ;
@@ -404,6 +504,8 @@ async fn main() {
         Router::new()
         .route("/append-entries", post(|state, req| handle_append_entry(state, req, heartbeat_sender)))
         .route("/request-vote", post(handle_request_vote))
+        .route("/add-value", post(handle_add_value))
+        .route("/get-value", post(handle_get_value))
         .with_state(state) ;
 
     // run our app with hyper, listening globally on port 3000
